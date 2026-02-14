@@ -1,60 +1,68 @@
-# 🚀 Prometheus + Node Exporter + Flask App Monitoring (AWS EC2)
+# Prometheus, Node Exporter and Grafana Monitoring Stack on AWS EC2
 
-## 📌 Project Overview
+## Project Overview
 
-This project demonstrates:
+This project demonstrates the deployment of a complete monitoring stack on AWS EC2 using:
 
-* ✅ Prometheus Installation on EC2
-* ✅ Node Exporter Setup
-* ✅ Custom Python Flask Application
-* ✅ Prometheus Custom Metrics Integration
-* ✅ System Monitoring (CPU, Requests, Errors, Latency)
-* ✅ AWS Security Group Configuration
+* Prometheus
+* Node Exporter
+* Flask Application with custom metrics
+* Grafana
+* Linux systemd services
 
-This is a **Production-style Monitoring Setup** built on AWS.
-
----
-
-# 🏗 Architecture
-
-```
-User → Flask App (Port 5000)
-             ↓
-       /metrics endpoint
-             ↓
-        Prometheus (9090)
-             ↓
-        Node Exporter (9100)
-```
+The system monitors both application-level and infrastructure-level metrics and provides visualization through Grafana dashboards.
 
 ---
 
-# ☁️ AWS Setup
+## Architecture
 
-### EC2 Configuration
+User → Flask Application (Port 5000)
+Flask exposes `/metrics` endpoint
+Prometheus (Port 9090) scrapes:
 
-| Component     | Value            |
-| ------------- | ---------------- |
-| Instance Type | t3.micro         |
-| OS            | Ubuntu 22.04 LTS |
+* Flask application metrics
+* Node Exporter system metrics
 
-### 🔐 Security Group Ports Opened
-
-| Port | Purpose       |
-| ---- | ------------- |
-| 22   | SSH           |
-| 9090 | Prometheus    |
-| 9100 | Node Exporter |
-| 5000 | Flask App     |
-| 3000 | Grafana       |
-
-Source: `0.0.0.0/0`
+Grafana (Port 3000) connects to Prometheus and visualizes metrics via dashboards.
 
 ---
 
-# 📦 Installation Steps
+## Technology Stack
 
-## 1️⃣ Install Prometheus
+* AWS EC2 (t3.micro)
+* Ubuntu 22.04 LTS
+* Prometheus v2.53.1
+* Node Exporter v1.8.1
+* Python (Flask)
+* Grafana
+* Linux systemd
+
+---
+
+## AWS EC2 Setup
+
+### Instance Configuration
+
+* Instance Type: t3.micro
+* OS: Ubuntu 22.04 LTS
+
+### Security Group Inbound Rules
+
+| Port | Purpose           |
+| ---- | ----------------- |
+| 22   | SSH               |
+| 9090 | Prometheus        |
+| 9100 | Node Exporter     |
+| 5000 | Flask Application |
+| 3000 | Grafana           |
+
+Source: 0.0.0.0/0
+
+---
+
+## Prometheus Installation
+
+### Create User and Directories
 
 ```bash
 sudo useradd --no-create-home --shell /bin/false prometheus
@@ -63,19 +71,7 @@ sudo mkdir /var/lib/prometheus
 sudo chown prometheus:prometheus /var/lib/prometheus
 ```
 
-Download:
-
-```bash
-wget https://github.com/prometheus/prometheus/releases/download/v2.53.1/prometheus-2.53.1.linux-amd64.tar.gz
-```
-
-Create service:
-
-```
-/etc/systemd/system/prometheus.service
-```
-
-Start:
+### Start Prometheus Service
 
 ```bash
 sudo systemctl daemon-reload
@@ -83,42 +79,69 @@ sudo systemctl start prometheus
 sudo systemctl enable prometheus
 ```
 
-Access:
+Access Prometheus:
 
 ```
-http://PUBLIC_IP:9090
+http://YOUR_PUBLIC_IP:9090
 ```
 
 ---
 
-## 2️⃣ Install Node Exporter
+## Node Exporter Installation
+
+### Start Node Exporter Service
 
 ```bash
-wget https://github.com/prometheus/node_exporter/releases/download/v1.8.1/node_exporter-1.8.1.linux-amd64.tar.gz
-```
-
-Create service:
-
-```
-/etc/systemd/system/node_exporter.service
-```
-
-Start:
-
-```bash
+sudo systemctl daemon-reload
 sudo systemctl start node_exporter
 sudo systemctl enable node_exporter
 ```
 
-Access:
+Verify:
 
 ```
-http://PUBLIC_IP:9100
+http://YOUR_PUBLIC_IP:9100
 ```
 
 ---
 
-## 3️⃣ Flask Monitoring App
+## Prometheus Configuration
+
+Edit:
+
+```
+/etc/prometheus/prometheus.yml
+```
+
+Configuration:
+
+```yaml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['localhost:9100']
+
+  - job_name: 'python_app'
+    static_configs:
+      - targets: ['localhost:5000']
+```
+
+Restart Prometheus:
+
+```bash
+sudo systemctl restart prometheus
+```
+
+---
+
+## Flask Monitoring Application
 
 ### Install Dependencies
 
@@ -129,167 +152,176 @@ source myenv/bin/activate
 pip install flask prometheus_client
 ```
 
----
-
-## 📄 app.py
-
-```python
-from flask import Flask, request
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-import time
-import random
-
-app = Flask(__name__)
-
-REQUEST_COUNT = Counter(
-    'app_requests_total',
-    'Total HTTP Requests',
-    ['method', 'endpoint', 'http_status']
-)
-
-ERROR_COUNT = Counter(
-    'app_errors_total',
-    'Total Error Responses'
-)
-
-REQUEST_LATENCY = Histogram(
-    'app_request_latency_seconds',
-    'Request latency',
-    ['endpoint']
-)
-
-@app.route('/')
-def home():
-    start_time = time.time()
-    time.sleep(random.uniform(0.1, 0.5))
-    status = 200
-    REQUEST_COUNT.labels(request.method, '/', status).inc()
-    REQUEST_LATENCY.labels('/').observe(time.time() - start_time)
-    return "🚀 Welcome to DevOps Monitoring App!", status
-
-@app.route('/about')
-def about():
-    start_time = time.time()
-    status = 200
-    REQUEST_COUNT.labels(request.method, '/about', status).inc()
-    REQUEST_LATENCY.labels('/about').observe(time.time() - start_time)
-    return "Production Ready Flask App with Prometheus Monitoring", status
-
-@app.route('/error')
-def error():
-    ERROR_COUNT.inc()
-    REQUEST_COUNT.labels(request.method, '/error', 500).inc()
-    return "❌ Something went wrong!", 500
-
-@app.route('/metrics')
-def metrics():
-    return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-```
-
-Run:
+### Run Application
 
 ```bash
 nohup python3 app.py > app.log 2>&1 &
 ```
 
----
+### Application Metrics
 
-# ⚙ Prometheus Configuration
+The Flask application exposes:
 
-File:
+* `app_requests_total`
+* `app_errors_total`
+* `app_request_latency_seconds`
 
-```
-/etc/prometheus/prometheus.yml
-```
-
-Add:
-
-```yaml
-- job_name: 'node_exporter'
-  static_configs:
-    - targets: ['localhost:9100']
-
-- job_name: 'python_app'
-  static_configs:
-    - targets: ['localhost:5000']
-```
-
-Restart:
-
-```bash
-sudo systemctl restart prometheus
-```
-
----
-
-# 📊 Prometheus Queries
-
-### Total Requests
+Example Prometheus query:
 
 ```
 app_requests_total
 ```
 
-### Error Rate
+---
 
-```
-rate(app_errors_total[1m])
-```
+## CPU Usage Monitoring
 
-### CPU Usage
+To calculate CPU usage percentage in Prometheus:
 
 ```
 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
 ```
 
-### Average Latency
+This formula subtracts idle CPU time from 100 to determine active CPU utilization.
+
+---
+
+## Grafana Installation
+
+### Install Grafana
+
+```bash
+sudo apt-get install -y apt-transport-https software-properties-common wget
+
+sudo mkdir -p /etc/apt/keyrings/
+
+wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null
+
+echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
+
+sudo apt-get update
+sudo apt-get install grafana -y
+
+sudo systemctl start grafana-server
+sudo systemctl enable grafana-server
+```
+
+Access Grafana:
 
 ```
-rate(app_request_latency_seconds_sum[5m]) 
-/
-rate(app_request_latency_seconds_count[5m])
+http://YOUR_PUBLIC_IP:3000
+```
+
+Default credentials:
+
+Username: admin
+Password: admin
+
+---
+
+## Add Prometheus Data Source in Grafana
+
+1. Login to Grafana
+2. Navigate to Connections → Data Sources
+3. Click Add Data Source
+4. Select Prometheus
+5. Set URL:
+
+```
+http://localhost:9090
+```
+
+6. Click Save & Test
+
+After successful connection, create dashboards for:
+
+* CPU usage
+* Application request count
+* Error rate
+* Request latency
+
+---
+
+## Metrics Monitored
+
+### Application Metrics
+
+* app_requests_total
+* app_errors_total
+* app_request_latency_seconds
+
+### Infrastructure Metrics
+
+* node_cpu_seconds_total
+* node_memory_MemAvailable_bytes
+* node_filesystem_size_bytes
+
+---
+
+## Project Screenshots
+
+### AWS Security Group
+
+![AWS Security Group](img/securityGroup.png)
+
+### Prometheus Service Running
+
+![Prometheus Installed](img/prometheous_installed.png)
+
+### Prometheus Configuration File
+
+![Prometheus Configuration](img/prometheous_yml_file.png)
+
+### Node Exporter Running
+
+![Node Exporter Installed](img/node_exporter_installed.png)
+
+### Application Metric (Table View)
+
+![Application Requests Metric Table](img/app_request_total.png)
+
+### Application Metric (Graph View)
+
+![Application Requests Metric Graph](img/app_request_total_graphview.png)
+
+### Grafana Installation
+
+![Grafana Installation](img/grafana_installation.png)
+
+### Prometheus Query Validation
+
+![Prometheus Query Screenshot](img/Screenshot 2026-02-13 003015.png)
+
+---
+
+## Repository Structure
+
+```
+prometheus-flask-monitoring/
+│
+├── app/
+│   ├── app.py
+│   └── requirements.txt
+│
+├── prometheus/
+│   ├── prometheus.yml
+│   ├── prometheus.service
+│   └── node_exporter.service
+│
+├── scripts/
+├── img/
+└── README.md
 ```
 
 ---
 
-# 📸 Screenshots
+## Skills Demonstrated
 
-Add your screenshots inside a folder:
-
-```
-screenshots/
-```
-
-Example:
-
-```
-screenshots/prometheus.png
-screenshots/node_exporter.png
-screenshots/metrics_graph.png
-```
-
-Then reference like:
-
-```markdown
-![Prometheus UI](screenshots/prometheus.png)
-```
-
----
-
-# 🎯 Skills Demonstrated
-
-* AWS EC2 Setup
-* Linux Administration
-* Systemd Services
-* Prometheus Installation
-* Node Exporter Setup
-* Flask Monitoring
-* Custom Metrics
-* DevOps Monitoring Architecture
-
----
-
+* AWS EC2 provisioning and configuration
+* Linux server administration
+* Prometheus setup and scrape configuration
+* Node Exporter integration
+* Custom application instrumentation
+* Grafana dashboard configuration
+* Infrastructure and application monitoring design
 
